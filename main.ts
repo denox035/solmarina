@@ -40,3 +40,4 @@ writeFileSync(
     game_path_max_bytes: 1000,
   }),
 );
+console.log(`dossier written to ${join(out, 'dossier.json')}`);

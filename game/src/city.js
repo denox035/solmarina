@@ -1,5 +1,5 @@
 // city.js — procedural Solmarina: road grid, blocks, buildings, beach, marina.
-// All geometry is generated from a seeded RNG so the map is identical every run.
+// All geometry comes from a seeded RNG, so the map is identical every run.
 export function mulberry32(seed) {
   let a = seed >>> 0;
   return function () {

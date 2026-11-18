@@ -163,6 +163,8 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyX') G.audio.toggleMute();
 });
 window.addEventListener('keyup', (e) => { G.keys[e.code] = false; });
+// Auto-pause when the tab loses focus, so the city doesn't run away unattended.
+window.addEventListener('blur', () => { if (G.state === 'play') G.state = 'pause'; });
 canvas.addEventListener('mousemove', (e) => {
   G.mouse.x = e.clientX; G.mouse.y = e.clientY; G.mouse.active = true;
   const cam = G.cam;
