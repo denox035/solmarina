@@ -38,8 +38,8 @@ export function buildCity(seed = 20261118) {
       const x0 = roadsX[ix] + ROAD / 2 + 14, y0 = roadsY[iy] + ROAD / 2 + 14;
       const x1 = roadsX[ix + 1] - ROAD / 2 - 14, y1 = roadsY[iy + 1] - ROAD / 2 - 14;
       if (y0 > BEACH_Y - 40 || x0 > MARINA_X - 40) continue; // beach / marina strips stay open
-      if (rnd() < 0.12) { // park / plaza instead of a building
-        buildings.push({ kind: 'park', x: x0, y: y0, w: x1 - x0, h: y1 - y0, trees: 3 + Math.floor(rnd() * 4) });
+      if (rnd() < 0.12) { // park / plaza instead of a building (also a police hiding spot)
+        buildings.push({ kind: 'park', x: x0, y: y0, w: x1 - x0, h: y1 - y0, trees: 3 + Math.floor(rnd() * 4), benches: 2 + Math.floor(rnd() * 3) });
         continue;
       }
       const w = 60 + rnd() * (x1 - x0 - 90), h = 60 + rnd() * (y1 - y0 - 90);

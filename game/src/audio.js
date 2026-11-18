@@ -77,6 +77,7 @@ export function createAudio() {
     pickup() { this.blip(660, 0.09); setTimeout(() => this.blip(990, 0.12), 70); },
     cash() { this.blip(880, 0.1); setTimeout(() => this.blip(1174, 0.1), 90); setTimeout(() => this.blip(1568, 0.16), 180); },
     crash() { this.noise(0.3, 0.5, 700); },
+    horn() { this.blip(370, 0.18, 'square', 0.12); setTimeout(() => this.blip(370, 0.18, 'square', 0.12), 200); },
     arrest() { this.blip(220, 0.4, 'sawtooth', 0.2); },
     missionOk() { [523, 659, 784].forEach((f, i) => setTimeout(() => this.blip(f, 0.14), i * 110)); },
     missionFail() { [392, 330, 262].forEach((f, i) => setTimeout(() => this.blip(f, 0.2, 'triangle', 0.18), i * 130)); },

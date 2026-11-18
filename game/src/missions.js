@@ -130,7 +130,10 @@ export function updateMissions(G, dt) {
       M.failT += dt;
       G.objectiveHint = 'You are LOSING him — get closer!';
       if (M.failT > 5) { failMission(G, 'you lost the tail'); return; }
-    } else M.failT = 0;
+    } else {
+      M.failT = 0;
+      G.objectiveHint = `Tail holding — stay in range. ${Math.ceil(60 - M.t)}s to go.`;
+    }
     M.progress = Math.min(1, M.t / 60);
     if (M.t > 60) completeMission(G);
   } else if (M.def.id === 4) {

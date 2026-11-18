@@ -88,6 +88,11 @@ function drawCity(G, ctx) {
         const ty = b.y + 20 + ((i * 91) % Math.max(20, b.h - 40));
         ctx.beginPath(); ctx.arc(tx, ty, 12, 0, Math.PI * 2); ctx.fill();
       }
+      // Park benches.
+      ctx.fillStyle = '#8a6a4a';
+      for (let i = 0; i < (b.benches || 2); i++) {
+        ctx.fillRect(b.x + 16 + i * 34, b.y + b.h - 22, 26, 6);
+      }
       continue;
     }
     // Shadow + body + roof detail.
@@ -341,6 +346,11 @@ function drawTitle(G, ctx, W, H) {
   ctx.fillStyle = G.saveExists ? '#7dff8a' : '#ffd24a';
   ctx.font = 'bold 18px system-ui, sans-serif';
   ctx.fillText(G.saveExists ? 'ENTER — Continue your story (save found)    ·    N — New game' : 'ENTER — Start the story', W / 2, H / 2 + 170);
+  if (G.saveExists && G.saveSummary) {
+    ctx.fillStyle = 'rgba(255,255,255,.75)';
+    ctx.font = '14px system-ui, sans-serif';
+    ctx.fillText(G.saveSummary, W / 2, H / 2 + 196);
+  }
   ctx.fillStyle = 'rgba(255,255,255,.55)';
   ctx.font = '12px system-ui, sans-serif';
   ctx.fillText('Original fiction. No real city, no real gang, no licensed anything.', W / 2, H - 24);

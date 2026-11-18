@@ -32,7 +32,8 @@ export function updatePeds(G, dt) {
     // Flee if the player shoots, speeds nearby, or a siren is close.
     const dPlayer = Math.hypot(ped.x - p.x, ped.y - p.y);
     const gunfire = G.stats.shotsFiredAt > G.time - 1.2;
-    if ((gunfire && dPlayer < 320) || (p.inCar && Math.abs(p.inCar.speed) > 200 && dPlayer < 90)) {
+    const copNear = G.cops.some(c => Math.hypot(c.x - ped.x, c.y - ped.y) < 140);
+    if ((gunfire && dPlayer < 320) || copNear || (p.inCar && Math.abs(p.inCar.speed) > 200 && dPlayer < 90)) {
       ped.flee = 2.5; ped.scared = true;
     }
     if (ped.flee > 0) {

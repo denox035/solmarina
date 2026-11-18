@@ -28,6 +28,13 @@ export function loadGame() {
 
 export function hasSave() { return !!loadGame(); }
 
+// One-line summary of the save for the title screen ("$1,250 · 3/5 jobs").
+export function saveSummary() {
+  const d = loadGame();
+  if (!d) return null;
+  return `$${Math.floor(d.cash).toLocaleString('en-US')} · ${(d.completed || []).length}/5 jobs · saved ${new Date(d.savedAt).toLocaleDateString()}`;
+}
+
 export function clearSave() {
   try { localStorage.removeItem(KEY); } catch (e) { /* ignore */ }
 }

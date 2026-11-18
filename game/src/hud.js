@@ -34,15 +34,17 @@ export function drawHUD(G, ctx, W, H) {
   ctx.font = '14px system-ui, sans-serif';
   ctx.fillStyle = '#dfe9ff';
   ctx.fillText(p.inCar ? '🚗 ' + (p.inCar.name || 'Car') : (p.weapon === 'pistol' ? `🔫 Pistol — ${p.ammo} ammo` : '✊ Fists — find ammo for a pistol'), 16, 64);
-  // Speed (bottom right) when driving
+  // Speed (above the minimap) when driving.
   if (p.inCar) {
     ctx.textAlign = 'right';
     ctx.font = 'bold 30px system-ui, sans-serif';
     ctx.fillStyle = '#fff';
-    ctx.fillText(`${Math.round(Math.abs(p.inCar.speed) * 0.36)} km/h`, W - 16, H - 44);
+    ctx.shadowColor = '#000'; ctx.shadowBlur = 4;
+    ctx.fillText(`${Math.round(Math.abs(p.inCar.speed) * 0.36)} km/h`, W - 16, H - 258);
+    ctx.shadowBlur = 0;
     ctx.font = '12px system-ui, sans-serif';
     ctx.fillStyle = '#dfe9ff';
-    ctx.fillText('E — exit car', W - 16, H - 14);
+    ctx.fillText('E — exit car', W - 16, H - 232);
   }
   // --- Objective banner (top centre) ---
   if (G.mission) {

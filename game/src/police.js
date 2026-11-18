@@ -87,14 +87,14 @@ function updateCopCar(G, car, dt) {
   const ny = car.y + Math.sin(car.angle) * car.speed * dt;
   if (!buildingAt(G.city, nx, ny) && !inWater(G.city, nx, ny)) { car.x = nx; car.y = ny; }
   else { car.angle += Math.PI / 2 * dt * 4; car.speed *= 0.6; }
-  // Ram the player's car or the player on foot.
+  // Ram the player's car or the player on foot. Damage is per-second while in contact.
   if (d < 44) {
     if (p.inCar) {
-      p.inCar.hp -= 26 * dt * 4;
+      p.inCar.hp -= 22 * dt;
       G.shake = 7;
       if (p.inCar.hp <= 0) { p.inCar.wrecked = true; p.inCar = null; G.msg = 'Your car was wrecked by the PD!'; }
     } else {
-      hurtPlayer(G, 14 * dt * 4, 'ram');
+      hurtPlayer(G, 10 * dt, 'ram');
     }
     car.speed *= 0.5;
   }

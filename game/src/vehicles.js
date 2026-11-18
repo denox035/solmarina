@@ -31,6 +31,8 @@ export function spawnTraffic(G, count = 16) {
   const rnd = G.rnd;
   for (let i = 0; i < count; i++) {
     const pt = randomRoadPoint(G.city, rnd);
+    // Never spawn traffic on top of the player.
+    if (Math.hypot(pt.x - G.player.x, pt.y - G.player.y) < 260) continue;
     const vertical = Math.abs(pt.x - nearestRoadCoord(G.city, pt.x)) < 2;
     const dir = vertical ? (rnd() < 0.5 ? 1 : 3) : (rnd() < 0.5 ? 0 : 2);
     const lane = 15; // right-hand lane offset

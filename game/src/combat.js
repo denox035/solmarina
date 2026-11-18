@@ -124,7 +124,7 @@ export function updateEnemies(G, dt) {
         e.shootCd = 1.0 + G.rnd() * 0.5;
         G.bullets.push({
           x: e.x, y: e.y, angle: e.angle + (G.rnd() - 0.5) * 0.2,
-          speed: 560, life: 0.9, from: 'enemy', dmg: 7,
+          speed: 520, life: 0.9, from: 'enemy', dmg: 7,
         });
         G.audio.shot();
       }

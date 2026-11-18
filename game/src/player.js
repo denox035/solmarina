@@ -71,7 +71,7 @@ export function addCash(G, amount, reason) {
   if (amount >= 500) G.msg = `Payday: +$${amount} — ${reason || 'job done'}.`;
 }
 
-export function nearestStealableCar(G, maxDist = 46) {
+export function nearestStealableCar(G, maxDist = 52) {
   const p = G.player;
   let best = null, bd = maxDist;
   for (const c of G.cars) {

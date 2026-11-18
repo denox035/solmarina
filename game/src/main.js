@@ -10,7 +10,7 @@ import { updatePolice } from './police.js';
 import { fireWeapon, updateBullets, updateEnemies, spawnPickups, updatePickups, makeEnemy } from './combat.js';
 import { MISSIONS, startMission, updateMissions, updateTailCar } from './missions.js';
 import { render } from './render.js';
-import { saveGame, loadGame, hasSave, clearSave } from './save.js';
+import { saveGame, loadGame, hasSave, clearSave, saveSummary } from './save.js';
 
 const params = new URLSearchParams(window.location.search);
 const scene = params.get('scene') || params.get('shot') || '';
@@ -39,7 +39,7 @@ export function createGame() {
     missionIdx: 0, mission: null, completedMissions: [], missionFailedIdx: -1,
     nextMissionAt: 0, objectiveHint: null, msg: '', msgT: 0,
     shake: 0, cam: null, stealTarget: null,
-    audio: createAudio(), saveExists: hasSave(),
+    audio: createAudio(), saveExists: hasSave(), saveSummary: saveSummary(),
     stats: { kills: 0, carsStolen: 0, missionsDone: 0, deaths: 0, playSeconds: 0, shotsFiredAt: -100 },
   };
   spawnParkedCars(G, 26);
@@ -84,10 +84,15 @@ function startPlaying(fromSave) {
 function stageScene(name) {
   G.state = 'play';
   G.audio.ensure();
+  // Hide the controls legend in staged shots so the frame is pure gameplay.
+  const helpEl = document.getElementById('help');
+  if (helpEl) helpEl.style.display = 'none';
+  // Hold W so staged cars keep driving through the screenshot window.
+  G.keys['KeyW'] = true;
   if (name === 'start') { G.state = 'title'; return; }
   if (name === 'drive' || name === 'play') {
     // Player driving down Sol Blvd with traffic around.
-    const car = makeCar(1700, 1400, 0, { color: '#d84a4a', name: 'Comet' });
+    const car = makeCar(1100, 1415, 0, { color: '#d84a4a', name: 'Comet' });
     car.player = true; G.player.inCar = car; car.speed = 220;
     G.cars.push(car);
     G.player.x = car.x; G.player.y = car.y;
@@ -95,7 +100,7 @@ function stageScene(name) {
     G.msg = 'SOLMARINA — steal cars, run jobs, outrun the PD.';
     G.msgT = 6;
   } else if (name === 'chase') {
-    const car = makeCar(1700, 1700, 0, { color: '#4a7ad8', name: 'Viento' });
+    const car = makeCar(1400, 1715, 0, { color: '#4a7ad8', name: 'Viento' });
     car.player = true; G.player.inCar = car; car.speed = 300;
     G.cars.push(car);
     G.player.x = car.x; G.player.y = car.y;
@@ -105,7 +110,7 @@ function stageScene(name) {
     G.msgT = 6;
   } else if (name === 'mission') {
     startMission(G, 1);
-    const car = makeCar(2300, 1700, Math.PI / 2, { color: '#e8c84a', name: 'Marlin' });
+    const car = makeCar(2285, 1100, Math.PI / 2, { color: '#e8c84a', name: 'Marlin' });
     car.player = true; G.player.inCar = car; car.speed = 180;
     G.cars.push(car);
     G.player.x = car.x; G.player.y = car.y;
@@ -123,6 +128,8 @@ function stageScene(name) {
     G.msg = 'Banco del Sol crew — Coral Kings at the marina!';
     G.msgT = 6;
   }
+  // Clear traffic from the player's lane ahead so staged cars cruise, not queue.
+  G.cars = G.cars.filter(c => c.ai !== 'traffic' || Math.abs(c.y - G.player.y) > 130 || Math.abs(c.x - G.player.x) > 700);
 }
 
 // ---- input ----
