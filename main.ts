@@ -1,43 +1,50 @@
-// A working gta6-01 entry (Node 22, standard library only): the game is this directory's
-// game/ folder, plain static files a desktop browser loads offline (game/index.html and its ES
-// modules, no library and no network request), and the program hands it in. It copies game/ and
-// screenshots/ from beside this file to /output and writes /output/dossier.json, the summary the
-// judge reads, with the vendored make.fun library. SOLMARINA replaces the Block Dodger
-// placeholder: a complete top-down 2D open-world crime game in plain Canvas 2D — procedural
-// coastal city, driving and car theft, traffic and pedestrians, a 1–5 star wanted system with
-// police chases, five story missions, on-foot combat, a canvas minimap HUD, WebAudio synth
-// sound and localStorage saves — all hand-written, zero network requests at runtime.
-// Put your 3 or 4 PNG or JPEG screenshots in screenshots/ (the first by name is the cover) and run it.
+// SOLMARINA — make.fun gta6-01 entry program (round 5, fresh in-session build).
 //
-// Serve it locally with `node serve.ts`, then open http://localhost:8080.
-// Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
-//   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
-
-import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+// Copies game/ and screenshots/ from this repository into the output
+// directory and writes /output/dossier.json with buildDossier from the kit's
+// vendor/makefun-game.ts. Node 22, standard library only, no network.
+// Run locally:  mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { join, resolve } from 'node:path';
 import { buildDossier } from './vendor/makefun-game.ts';
 
-const here = fileURLToPath(new URL('.', import.meta.url));
-const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
+const repoRoot = resolve(import.meta.dirname);
+const outDir = resolve(process.env.MAKEFUN_OUTPUT_DIR || '/output');
+const gameDir = join(repoRoot, 'game');
+const shotsDir = join(repoRoot, 'screenshots');
 
-mkdirSync(out, { recursive: true });
-cpSync(join(here, 'game'), join(out, 'game'), { recursive: true });
-mkdirSync(join(out, 'screenshots'), { recursive: true });
-if (existsSync(join(here, 'screenshots'))) cpSync(join(here, 'screenshots'), join(out, 'screenshots'), { recursive: true });
+// Fail fast on a bad tree instead of handing the grader a half entry.
+if (!existsSync(join(gameDir, 'index.html'))) {
+  throw new Error('SOLMARINA: game/index.html is missing');
+}
+const shotFiles = readdirSync(shotsDir).filter((f) => /\.(png|jpe?g)$/i.test(f));
+if (shotFiles.length < 3 || shotFiles.length > 4) {
+  throw new Error('SOLMARINA: screenshots/ must hold 3 or 4 images, found ' + shotFiles.length);
+}
+for (const f of shotFiles) {
+  if (statSync(join(shotsDir, f)).size > 262144) {
+    throw new Error('SOLMARINA: screenshot ' + f + ' is over the 256 KiB cap');
+  }
+}
 
-// The scorer's own caps (reference/gate.json): only text_max_bytes shapes the bytes; the others refuse an entry the
-// scorer would refuse (more than 4 screenshots or one over 256 KiB; more than 993 files in game/ or 48 MiB of game
-// files, in all, or a path under game/ over 1000 bytes: game/ counts beside /output's own 1000-entry cap, its
-// screenshots/ and dossier.json).
-writeFileSync(
-  join(out, 'dossier.json'),
-  buildDossier(out, {
-    text_max_bytes: 163840,
-    screenshots: { max: 4, max_bytes: 262144 },
-    game_max_files: 993,
-    game_max_bytes: 50331648,
-    game_path_max_bytes: 1000,
-  }),
-);
-console.log(`dossier written to ${join(out, 'dossier.json')}`);
+rmSync(outDir, { recursive: true, force: true });
+mkdirSync(outDir, { recursive: true });
+cpSync(gameDir, join(outDir, 'game'), { recursive: true });
+cpSync(shotsDir, join(outDir, 'screenshots'), { recursive: true });
+
+const dossier = buildDossier(outDir, {
+  text_max_bytes: 163840,
+  screenshots: { max: 4, max_bytes: 262144 },
+  game_max_files: 993,
+  game_max_bytes: 50331648,
+});
+writeFileSync(join(outDir, 'dossier.json'), dossier);
+// Read back what was written: the grader requires the dossier to equal
+// what buildDossier writes, so confirm the bytes on disk match.
+const written = readFileSync(join(outDir, 'dossier.json'));
+if (!written.equals(dossier)) {
+  throw new Error('SOLMARINA: dossier.json on disk does not match the built bytes');
+}
+const digest = createHash('sha256').update(written).digest('hex').slice(0, 16);
+console.log('SOLMARINA dossier written: ' + dossier.length + ' bytes, sha256 ' + digest + '… -> ' + join(outDir, 'dossier.json'));

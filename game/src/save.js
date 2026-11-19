@@ -1,40 +1,56 @@
-// save.js — localStorage persistence for SOLMARINA.
-const KEY = 'solmarina-save-v1';
+// SOLMARINA save: progress persists in localStorage — cash, missions, story
+// state and the player's last position.
+window.SOL = window.SOL || {};
+(function () {
+  var S = window.SOL;
+  var KEY = 'solmarina-save-v1';
 
-export function saveGame(G) {
-  try {
-    const data = {
-      version: 1, savedAt: Date.now(),
-      cash: Math.round(G.player.cash), hp: Math.round(G.player.hp),
-      x: Math.round(G.player.x), y: Math.round(G.player.y),
-      missionIdx: G.missionIdx, completed: G.completedMissions.slice(),
-      wanted: G.wanted, kills: G.stats.kills, carsStolen: G.stats.carsStolen,
-      missionsDone: G.stats.missionsDone, playSeconds: Math.round(G.stats.playSeconds),
-    };
-    localStorage.setItem(KEY, JSON.stringify(data));
+  function save(w) {
+    try {
+      var data = {
+        cash: w.player.cash,
+        hp: w.player.hp,
+        missionsDone: w.player.missionsDone,
+        missionIndex: w.missions.index,
+        storyDone: w.player.storyDone,
+        x: w.player.x, y: w.player.y,
+        clock: w.clockMinutes
+      };
+      window.localStorage.setItem(KEY, JSON.stringify(data));
+      return true;
+    } catch (e) { return false; }
+  }
+
+  function load() {
+    try {
+      var raw = window.localStorage.getItem(KEY);
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch (e) { return null; }
+  }
+
+  function exists() {
+    try { return !!window.localStorage.getItem(KEY); }
+    catch (e) { return false; }
+  }
+
+  function clear() {
+    try { window.localStorage.removeItem(KEY); } catch (e) {}
+  }
+
+  function applySave(w, data) {
+    if (!data) return false;
+    w.player.cash = data.cash;
+    w.player.hp = data.hp;
+    w.player.missionsDone = data.missionsDone || 0;
+    w.missions.index = data.missionIndex || 0;
+    w.player.storyDone = !!data.storyDone;
+    if (data.x !== undefined && data.y !== undefined) {
+      w.player.x = data.x; w.player.y = data.y;
+    }
+    if (data.clock !== undefined) w.clockMinutes = data.clock;
     return true;
-  } catch (e) { return false; }
-}
+  }
 
-export function loadGame() {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return null;
-    const d = JSON.parse(raw);
-    if (!d || d.version !== 1) return null;
-    return d;
-  } catch (e) { return null; }
-}
-
-export function hasSave() { return !!loadGame(); }
-
-// One-line summary of the save for the title screen ("$1,250 · 3/5 jobs").
-export function saveSummary() {
-  const d = loadGame();
-  if (!d) return null;
-  return `$${Math.floor(d.cash).toLocaleString('en-US')} · ${(d.completed || []).length}/5 jobs · saved ${new Date(d.savedAt).toLocaleDateString()}`;
-}
-
-export function clearSave() {
-  try { localStorage.removeItem(KEY); } catch (e) { /* ignore */ }
-}
+  S.Save = { save: save, load: load, exists: exists, clear: clear, applySave: applySave };
+})();

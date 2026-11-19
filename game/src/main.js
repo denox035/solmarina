@@ -1,271 +1,426 @@
-// main.js — SOLMARINA boot, game loop, state machine, input, save, scene staging.
-// ?scene=drive|chase|mission|combat (or legacy ?shot=start|play|end) stages a scene
-// and sets window.__shotReady once painted, for screenshots.
-import { buildCity, mulberry32 } from './city.js';
-import { createAudio } from './audio.js';
-import { createPlayer, updatePlayer, tryStealCar, nearestStealableCar } from './player.js';
-import { spawnParkedCars, spawnTraffic, updateVehicles, makeCar } from './vehicles.js';
-import { spawnPeds, updatePeds } from './peds.js';
-import { updatePolice } from './police.js';
-import { fireWeapon, updateBullets, updateEnemies, spawnPickups, updatePickups, makeEnemy } from './combat.js';
-import { MISSIONS, startMission, updateMissions, updateTailCar } from './missions.js';
-import { render } from './render.js';
-import { saveGame, loadGame, hasSave, clearSave, saveSummary } from './save.js';
+// SOLMARINA main: boot, event bus, input, camera, game loop, state machine
+// (title / play / pause / busted / wasted) and the staged screenshot scenes.
+window.SOL = window.SOL || {};
+(function () {
+  var S = window.SOL;
+  var City = S.City;
 
-const params = new URLSearchParams(window.location.search);
-const scene = params.get('scene') || params.get('shot') || '';
-const STEP = 1 / 60;
-
-const canvas = document.getElementById('game');
-const ctx = canvas.getContext('2d');
-
-function resize() {
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
-}
-window.addEventListener('resize', resize);
-resize();
-
-export function createGame() {
-  const rnd = mulberry32(20261118);
-  const city = buildCity(20261118);
-  const G = {
-    canvas, ctx, city, rnd,
-    time: 0, state: 'title', zoom: 1,
-    keys: {}, mouse: { x: 0, y: 0, worldX: 0, worldY: 0, active: false, down: false },
-    player: createPlayer(city.landmarks.hideout.x + 40, city.landmarks.hideout.y + 60),
-    cars: [], peds: [], cops: [], bullets: [], enemies: [], pickups: [],
-    floaters: [], wanted: 0, wantedTimer: 0, lastCrimeAt: -100,
-    missionIdx: 0, mission: null, completedMissions: [], missionFailedIdx: -1,
-    nextMissionAt: 0, objectiveHint: null, msg: '', msgT: 0,
-    shake: 0, cam: null, stealTarget: null,
-    audio: createAudio(), saveExists: hasSave(), saveSummary: saveSummary(),
-    stats: { kills: 0, carsStolen: 0, missionsDone: 0, deaths: 0, playSeconds: 0, shotsFiredAt: -100 },
-  };
-  spawnParkedCars(G, 26);
-  spawnTraffic(G, 16);
-  spawnPeds(G, 26);
-  spawnPickups(G);
-  return G;
-}
-
-let G = createGame();
-window.__game = G; // handy for debugging / playtests
-
-function resetGame(keepSave = false) {
-  const fresh = createGame();
-  if (keepSave) { /* fresh state, save stays on disk */ }
-  G = fresh;
-  window.__game = G;
-}
-
-function applySave(d) {
-  G.player.cash = d.cash; G.player.hp = d.hp;
-  G.player.x = d.x; G.player.y = d.y;
-  G.missionIdx = d.missionIdx; G.completedMissions = d.completed || [];
-  G.wanted = d.wanted || 0;
-  G.stats.kills = d.kills || 0; G.stats.carsStolen = d.carsStolen || 0;
-  G.stats.missionsDone = d.missionsDone || 0; G.stats.playSeconds = d.playSeconds || 0;
-  if (G.missionIdx < MISSIONS.length) G.nextMissionAt = G.time + 1;
-}
-
-function startPlaying(fromSave) {
-  if (fromSave) {
-    const d = loadGame();
-    if (d) applySave(d);
-  }
-  G.state = 'play';
-  G.audio.ensure();
-  G.msg = fromSave ? 'Welcome back to Solmarina.' : 'Welcome to Solmarina. Press M to take your first job from Rico.';
-  G.msgT = 5;
-}
-
-// ---- staged scenes for screenshots (real gameplay, just pre-positioned) ----
-function stageScene(name) {
-  G.state = 'play';
-  G.audio.ensure();
-  // Hide the controls legend in staged shots so the frame is pure gameplay.
-  const helpEl = document.getElementById('help');
-  if (helpEl) helpEl.style.display = 'none';
-  // Hold W so staged cars keep driving through the screenshot window.
-  G.keys['KeyW'] = true;
-  if (name === 'start') { G.state = 'title'; return; }
-  if (name === 'drive' || name === 'play') {
-    // Player driving down Sol Blvd with traffic around.
-    const car = makeCar(1100, 1415, 0, { color: '#d84a4a', name: 'Comet' });
-    car.player = true; G.player.inCar = car; car.speed = 220;
-    G.cars.push(car);
-    G.player.x = car.x; G.player.y = car.y;
-    startMission(G, 0);
-    G.msg = 'SOLMARINA — steal cars, run jobs, outrun the PD.';
-    G.msgT = 6;
-  } else if (name === 'chase') {
-    const car = makeCar(1400, 1715, 0, { color: '#4a7ad8', name: 'Viento' });
-    car.player = true; G.player.inCar = car; car.speed = 300;
-    G.cars.push(car);
-    G.player.x = car.x; G.player.y = car.y;
-    G.wanted = 3; G.wantedTimer = 0;
-    startMission(G, 4);
-    G.msg = '3 STARS — the whole PD is on you!';
-    G.msgT = 6;
-  } else if (name === 'mission') {
-    startMission(G, 1);
-    const car = makeCar(2285, 1100, Math.PI / 2, { color: '#e8c84a', name: 'Marlin' });
-    car.player = true; G.player.inCar = car; car.speed = 180;
-    G.cars.push(car);
-    G.player.x = car.x; G.player.y = car.y;
-    G.msg = 'JOB 2 — Salt in the Wound: reach the marina docks.';
-    G.msgT = 6;
-  } else if (name === 'combat') {
-    G.player.x = 2900; G.player.y = 1500;
-    G.player.weapon = 'pistol'; G.player.ammo = 48;
-    G.player.angle = 0;
-    for (let i = 0; i < 4; i++) {
-      G.enemies.push(makeEnemy(G, 3050 + i * 40, 1420 + (i % 2) * 120, { hp: 70, aggro: true }));
+  // ---- tiny event bus (other modules emit into it at run time) ----
+  var handlers = {};
+  S.Events = {
+    on: function (ev, fn) { (handlers[ev] = handlers[ev] || []).push(fn); },
+    emit: function (ev) {
+      var args = Array.prototype.slice.call(arguments, 1);
+      var list = handlers[ev] || [];
+      for (var i = 0; i < list.length; i++) list[i].apply(null, args);
     }
-    startMission(G, 3);
-    G.wanted = 2;
-    G.msg = 'Banco del Sol crew — Coral Kings at the marina!';
-    G.msgT = 6;
-  }
-  // Clear traffic from the player's lane ahead so staged cars cruise, not queue.
-  G.cars = G.cars.filter(c => c.ai !== 'traffic' || Math.abs(c.y - G.player.y) > 130 || Math.abs(c.x - G.player.x) > 700);
-}
+  };
 
-// ---- input ----
-window.addEventListener('keydown', (e) => {
-  if (e.repeat) return;
-  G.keys[e.code] = true;
-  G.audio.ensure();
-  if (G.state === 'title') {
-    if (e.code === 'Enter') startPlaying(G.saveExists);
-    if (e.code === 'KeyN') { clearSave(); G.saveExists = false; startPlaying(false); }
-    return;
-  }
-  if (G.state === 'dead' || G.state === 'win') {
-    if (e.code === 'Enter') { resetGame(); startPlaying(false); }
-    return;
-  }
-  if (e.code === 'KeyP' || e.code === 'Escape') {
-    G.state = G.state === 'play' ? 'pause' : G.state === 'pause' ? 'play' : G.state;
-  }
-  if (G.state !== 'play') return;
-  if (e.code === 'KeyE') tryStealCar(G);
-  if (e.code === 'KeyF') fireWeapon(G);
-  if (e.code === 'KeyM') {
-    if (!G.mission && G.missionIdx < MISSIONS.length) startMission(G, G.missionIdx);
-    else if (G.mission) G.msg = `${G.mission.def.name}: ${G.mission.def.brief}`;
-    G.msgT = 6;
-  }
-  if (e.code === 'KeyS' && G.state === 'pause') { /* S handled below in pause */ }
-  if (e.code === 'KeyR') { resetGame(); startPlaying(false); }
-  if (e.code === 'KeyM' && e.shiftKey) { /* no-op */ }
-  if (e.code === 'KeyX') G.audio.toggleMute();
-});
-window.addEventListener('keyup', (e) => { G.keys[e.code] = false; });
-// Auto-pause when the tab loses focus, so the city doesn't run away unattended.
-window.addEventListener('blur', () => { if (G.state === 'play') G.state = 'pause'; });
-canvas.addEventListener('mousemove', (e) => {
-  G.mouse.x = e.clientX; G.mouse.y = e.clientY; G.mouse.active = true;
-  const cam = G.cam;
-  if (cam) {
-    G.mouse.worldX = cam.x + e.clientX / cam.zoom;
-    G.mouse.worldY = cam.y + e.clientY / cam.zoom;
-  }
-});
-canvas.addEventListener('mousedown', (e) => {
-  G.audio.ensure();
-  if (G.state !== 'play') return;
-  G.mouse.down = true;
-  fireWeapon(G);
-});
-canvas.addEventListener('mouseup', () => { G.mouse.down = false; });
-canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
 
-// Pause-screen save: S while paused.
-window.addEventListener('keydown', (e) => {
-  if (G.state === 'pause' && e.code === 'KeyS') {
-    saveGame(G);
-    G.msg = 'Game saved.';
-    G.msgT = 3;
+  function fitCanvas() {
+    var scale = Math.min(window.innerWidth / 1280, window.innerHeight / 720);
+    canvas.style.width = Math.floor(1280 * scale) + 'px';
+    canvas.style.height = Math.floor(720 * scale) + 'px';
   }
-});
+  window.addEventListener('resize', fitCanvas);
+  fitCanvas();
 
-// ---- update ----
-function update(dt) {
-  G.time += dt;
-  G.stats.playSeconds += dt;
-  if (G.msgT > 0) G.msgT -= dt;
-  for (let i = G.floaters.length - 1; i >= 0; i--) {
-    const f = G.floaters[i];
-    f.t += dt;
-    if (f.t > 1.6) G.floaters.splice(i, 1);
+  var params = new URLSearchParams(window.location.search);
+  var scene = params.get('scene') || '';
+
+  // ---- world ----
+  var w = {
+    state: 'title', time: 0, clockMinutes: 9 * 60,
+    player: null, cars: [], peds: [], police: [], bullets: [],
+    wanted: S.Police.makeWanted(), missions: S.Missions.makeMissions(),
+    toasts: [], cam: { x: 0, y: 0 }, dusk: false,
+    fine: 0, endKind: '', saveExists: S.Save.exists(),
+    lastRamT: -10, lastCrashT: -10, sprayCooldown: 0,
+    mouse: { x: 640, y: 360, down: false }
+  };
+  w.toast = function (text, life) {
+    w.toasts.push({ text: text, life: life || 3 });
+    if (w.toasts.length > 3) w.toasts.shift();
+  };
+  Object.defineProperty(w, 'clock', {
+    get: function () {
+      var h = Math.floor(w.clockMinutes / 60) % 24;
+      var m = Math.floor(w.clockMinutes % 60);
+      return (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m;
+    }
+  });
+  window.SOL.world = w;
+
+  function freshWorld(spawn) {
+    w.player = S.Player.makePlayer(spawn.x, spawn.y);
+    w.cars = S.Vehicles.spawnTraffic(14, spawn);
+    w.peds = S.Peds.spawnPeds(24, spawn);
+    w.police = [];
+    w.bullets = S.Combat.makeBullets();
+    w.wanted = S.Police.makeWanted();
+    w.missions = S.Missions.makeMissions();
+    w.toasts = [];
+    w.dusk = false;
+    w.demoDrive = false;
   }
-  G.stealTarget = G.player.inCar ? null : nearestStealableCar(G);
-  updatePlayer(G, dt);
-  updateVehicles(G, dt);
-  updateTailCar(G, dt);
-  updatePeds(G, dt);
-  updatePolice(G, dt);
-  updateBullets(G, dt);
-  updateEnemies(G, dt);
-  updatePickups(G, dt);
-  updateMissions(G, dt);
-  // Vault cash pickup (mission 4): walking over it grabs the loot.
-  if (G.mission && G.mission.def.id === 4 && G.mission.stage === 1 && !G.mission.cashGrabbed) {
-    for (let i = G.pickups.length - 1; i >= 0; i--) {
-      const pk = G.pickups[i];
-      if (pk.kind === 'vaultcash' && Math.hypot(pk.x - G.player.x, pk.y - G.player.y) < 34 && !G.player.inCar) {
-        G.pickups.splice(i, 1);
-        G.mission.cashGrabbed = true;
-        G.audio.cash();
-        G.msg = 'Cash grabbed! RUN — every cop in the city is coming!';
-        G.msgT = 5;
+
+  // ---- events ----
+  S.Events.on('carStolen', function () {
+    S.Police.addHeat(w.wanted, 12, 'car stolen');
+    w.toast('Car stolen! The PD noticed.', 3);
+  });
+  S.Events.on('pedHit', function (ped, byPlayer) {
+    if (!byPlayer) return; // traffic accidents are not the player's crime
+    S.Police.addHeat(w.wanted, 25, 'pedestrian hit');
+    w.toast('You hit a pedestrian!', 2);
+  });
+  S.Events.on('pedShot', function (ped, owner) {
+    if (owner !== 'player') return;
+    S.Police.addHeat(w.wanted, 30, 'pedestrian shot');
+  });
+  S.Events.on('copHit', function () {
+    S.Police.addHeat(w.wanted, 30, 'officer hit');
+  });
+  S.Events.on('crash', function () {
+    if (w.time - w.lastCrashT > 0.8) { w.lastCrashT = w.time; S.Audio.crash(); }
+  });
+  S.Events.on('ram', function (car, dist) {
+    if (w.time - w.lastRamT > 0.7 && w.player.inCar) {
+      w.lastRamT = w.time;
+      w.player.inCar.hp -= 9;
+      S.Audio.crash();
+      if (w.player.inCar.hp <= 0) {
+        w.player.inCar.dead = true;
+        S.Events.emit('carWrecked', w.player.inCar);
       }
     }
-  }
-  // Autosave every 60s of play.
-  if (Math.floor(G.stats.playSeconds) % 60 === 0 && G.stats.playSeconds > 1 && !G._savedAtSec) {
-    G._savedAtSec = Math.floor(G.stats.playSeconds);
-    saveGame(G);
-  }
-  if (Math.floor(G.stats.playSeconds) % 60 !== 0) G._savedAtSec = 0;
-  // Engine sound idles down on foot.
-  if (!G.player.inCar) G.audio.setEngine(0, false);
-}
-
-// ---- main loop ----
-let last = performance.now();
-let acc = 0;
-function frame(now) {
-  requestAnimationFrame(frame);
-  let dt = (now - last) / 1000;
-  last = now;
-  if (dt > 0.25) dt = 0.25;
-  if (G.state === 'play') {
-    acc += dt;
-    let steps = 0;
-    while (acc >= STEP && steps < 5) { update(STEP); acc -= STEP; steps++; }
-    if (steps === 5) acc = 0;
-  }
-  render(G);
-}
-
-// Boot: stage a scene if requested, else title screen.
-if (scene) {
-  stageScene(scene);
-  // Let the world settle for a second, then flag readiness for the screenshot.
-  let settled = 0;
-  const settle = setInterval(() => {
-    for (let i = 0; i < 10; i++) update(STEP);
-    render(G);
-    settled++;
-    if (settled >= 6) {
-      clearInterval(settle);
-      window.__shotReady = true;
+  });
+  S.Events.on('carWrecked', function (car) {
+    if (w.player.inCar === car) {
+      S.Player.exitCar(w.player);
+      w.toast('Your car is wrecked!', 3);
     }
-  }, 100);
-} else {
-  window.__shotReady = true;
-}
-requestAnimationFrame(frame);
+  });
+  S.Events.on('playerDown', function () {
+    endGame('wasted');
+  });
+  S.Events.on('busted', function () {
+    endGame('busted');
+  });
+  S.Events.on('wantedUp', function (stars) {
+    if (stars >= 1) { S.Audio.siren.start(); S.Audio.siren.set(true); }
+  });
+  S.Events.on('wantedDown', function (stars) {
+    if (stars === 0) S.Audio.siren.set(false);
+  });
+  S.Events.on('missionDone', function () { S.Save.save(w); });
+
+  function endGame(kind) {
+    if (w.state !== 'play') return;
+    w.endKind = kind;
+    w.state = 'end';
+    w.fine = Math.min(w.player.cash, kind === 'busted' ? 200 : 150);
+    w.player.cash -= w.fine;
+    S.Audio.busted();
+    S.Audio.siren.set(false);
+    S.Audio.engine.set(0, false);
+  }
+
+  function respawnAfterEnd() {
+    var place = w.endKind === 'busted'
+      ? { x: City.policeHQ.x + 80, y: City.policeHQ.y + 40 }
+      : { x: City.hospital.x + 80, y: City.hospital.y + 40 };
+    S.Player.respawn(w.player, place);
+    w.wanted = S.Police.makeWanted();
+    w.police = [];
+    w.state = 'play';
+    w.toast(w.endKind === 'busted' ? 'Walk free. Stay clean out there.' : 'Patched up. Back on your feet.', 3);
+  }
+
+  // ---- input ----
+  var keys = {};
+  var input = { up: false, down: false, left: false, right: false, shift: false };
+  function refreshInput() {
+    input.up = !!(keys['KeyW'] || keys['ArrowUp']);
+    input.down = !!(keys['KeyS'] || keys['ArrowDown']);
+    input.left = !!(keys['KeyA'] || keys['ArrowLeft']);
+    input.right = !!(keys['KeyD'] || keys['ArrowRight']);
+    input.shift = !!keys['ShiftLeft'] || !!keys['ShiftRight'];
+  }
+  window.addEventListener('keydown', function (e) {
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].indexOf(e.code) >= 0) e.preventDefault();
+    S.Audio.unlock();
+    if (e.repeat) return;
+    keys[e.code] = true;
+    refreshInput();
+    if (w.state === 'title') {
+      if (e.code === 'Enter') startGame(false);
+      else if (e.code === 'KeyN') startGame(true);
+      return;
+    }
+    if (w.state === 'end') {
+      if (e.code === 'Enter') respawnAfterEnd();
+      return;
+    }
+    if (e.code === 'KeyP' || e.code === 'Escape') {
+      if (w.state === 'play') w.state = 'pause';
+      else if (w.state === 'pause') w.state = 'play';
+      return;
+    }
+    if (w.state !== 'play') return;
+    if (e.code === 'KeyE') {
+      if (w.player.inCar) S.Player.exitCar(w.player);
+      else S.Player.tryEnterCar(w.player, w.cars);
+    } else if (e.code === 'KeyF') {
+      S.Combat.punch(w.player, w.peds, w.police.filter(function (p) { return p.onFoot; }));
+    } else if (e.code === 'Digit1') { w.player.weapon = 'fists'; }
+    else if (e.code === 'Digit2') { w.player.weapon = 'pistol'; }
+    else if (e.code === 'KeyM') {
+      if (!w.missions.active) {
+        if (!S.Missions.startMission(w)) w.toast('No more jobs — story complete!', 3);
+      }
+    } else if (e.code === 'KeyN') {
+      w.toast(S.Audio.toggleMute() ? 'Muted' : 'Sound on', 1.5);
+    } else if (e.code === 'KeyR' && w.state === 'pause') {
+      freshWorld({ x: 800, y: 720 });
+      w.state = 'play';
+    }
+  });
+  window.addEventListener('keyup', function (e) {
+    keys[e.code] = false;
+    refreshInput();
+  });
+  canvas.addEventListener('mousemove', function (e) {
+    var r = canvas.getBoundingClientRect();
+    w.mouse.x = (e.clientX - r.left) * (1280 / r.width);
+    w.mouse.y = (e.clientY - r.top) * (720 / r.height);
+  });
+  canvas.addEventListener('mousedown', function (e) {
+    S.Audio.unlock();
+    if (w.state !== 'play') return;
+    if (w.player.inCar || w.player.dead) return;
+    if (w.player.weapon !== 'pistol') return;
+    if (w.player.reloadT > 0) return;
+    if (w.player.ammo <= 0) { w.player.reloadT = 1.2; return; }
+    w.player.ammo--;
+    var aim = Math.atan2(w.mouse.y + w.cam.y - w.player.y, w.mouse.x + w.cam.x - w.player.x);
+    w.player.aimAngle = aim;
+    S.Combat.fireBullet(w.bullets, w.player.x, w.player.y, aim, 'player');
+    S.Audio.shot();
+    S.Peds.scare(w.peds, w.player.x, w.player.y, 260);
+    S.Police.addHeat(w.wanted, 6, 'shots fired');
+    if (w.player.ammo <= 0) w.player.reloadT = 1.2;
+  });
+  canvas.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+  function startGame(fresh) {
+    if (fresh) S.Save.clear();
+    var spawn = { x: 800, y: 720 };
+    freshWorld(spawn);
+    var saved = fresh ? null : S.Save.load();
+    if (saved) {
+      S.Save.applySave(w, saved);
+      w.toast('Welcome back — $' + w.player.cash + ', ' + w.player.missionsDone + ' jobs done', 4);
+    }
+    w.state = 'play';
+    S.Audio.music.start();
+    S.Audio.engine.start();
+  }
+
+  // ---- staged scenes for screenshots (real gameplay states) ----
+  function stageScene(name) {
+    if (name === 'drive') {
+      freshWorld({ x: 800, y: 1000 });
+      var car = S.Vehicles.makeCar(800, 1000, 0, S.Vehicles.MODELS[2], 'player');
+      w.cars.push(car);
+      w.player.inCar = car;
+      w.player.x = car.x; w.player.y = car.y;
+      w.demoDrive = true;
+      w.clockMinutes = 10 * 60 + 20;
+    } else if (name === 'chase') {
+      freshWorld({ x: 480, y: 720 });
+      var gt = S.Vehicles.makeCar(480, 720, 0, S.Vehicles.MODELS[2], 'player');
+      w.cars.push(gt);
+      w.player.inCar = gt;
+      w.player.x = gt.x; w.player.y = gt.y;
+      w.demoDrive = true;
+      S.Police.addHeat(w.wanted, 110, 'staged chase');
+      // Three pursuit cars start on the same road, closing in.
+      var spots = [[-260, 0], [-430, 0], [380, 0]];
+      for (var si = 0; si < spots.length; si++) {
+        var cx = w.player.x + spots[si][0], cy = w.player.y + spots[si][1];
+        w.police.push(S.Police.makeCopCar(cx, cy, 0));
+      }
+      w.toast('Lose the cops!', 4);
+      w.clockMinutes = 16 * 60 + 40;
+    } else if (name === 'mission') {
+      freshWorld({ x: 480, y: 440 });
+      var sedan = S.Vehicles.makeCar(480, 440, 0, S.Vehicles.MODELS[1], 'player');
+      w.cars.push(sedan);
+      w.player.inCar = sedan;
+      w.player.x = sedan.x; w.player.y = sedan.y;
+      w.demoDrive = true;
+      w.missions.index = 1;
+      S.Missions.startMission(w);
+      w.clockMinutes = 17 * 60 + 5;
+    } else if (name === 'combat') {
+      freshWorld({ x: City.MARINA_X + 60, y: 900 });
+      w.dusk = true;
+      w.player.x = City.MARINA_X + 60; w.player.y = 900;
+      w.player.weapon = 'pistol';
+      S.Police.addHeat(w.wanted, 50, 'staged combat');
+      var c1 = S.Police.makeCopFoot(w.player.x - 220, w.player.y - 60);
+      var c2 = S.Police.makeCopFoot(w.player.x - 260, w.player.y + 90);
+      w.police.push(c1, c2);
+      S.Peds.scare(w.peds, w.player.x, w.player.y, 500);
+      w.clockMinutes = 19 * 60 + 10;
+    } else {
+      freshWorld({ x: 800, y: 720 });
+    }
+    w.state = 'play';
+    S.Audio.music.start();
+    S.Audio.engine.start();
+  }
+
+  // ---- simulation ----
+  function step(dt) {
+    w.time += dt;
+    w.clockMinutes += dt * 0.5;
+    for (var i = w.toasts.length - 1; i >= 0; i--) {
+      w.toasts[i].life -= dt;
+      if (w.toasts[i].life <= 0) w.toasts.splice(i, 1);
+    }
+    var pl = w.player;
+    // Aim follows the mouse on foot.
+    if (!pl.inCar && !pl.dead) {
+      pl.aimAngle = Math.atan2(w.mouse.y + w.cam.y - pl.y, w.mouse.x + w.cam.x - pl.x);
+    }
+    // Player: on foot or driving. In staged scenes the car cruises itself
+    // (attract mode) so screenshots show the city alive.
+    if (pl.inCar) {
+      var car = pl.inCar;
+      if (w.demoDrive) {
+        S.Vehicles.trafficStep(car, dt, w.cars);
+        pl.x = car.x; pl.y = car.y; pl.angle = car.angle;
+        S.Audio.engine.set(Math.abs(car.speed) / car.model.top, true);
+      } else {
+        var throttle = (input.up ? 1 : 0) - (input.down ? 0.7 : 0);
+        var steer = (input.right ? 1 : 0) - (input.left ? 1 : 0);
+        S.Vehicles.drive(car, throttle, steer, dt);
+        pl.x = car.x; pl.y = car.y; pl.angle = car.angle;
+        S.Audio.engine.set(Math.abs(car.speed) / car.model.top, true);
+      }
+      if (car.hp <= 0 && !car.dead) {
+        car.dead = true;
+        S.Events.emit('carWrecked', car);
+      }
+      // Pay N Spray: drive through to clear the heat for $100.
+      w.sprayCooldown -= dt;
+      var sp = City.spray;
+      if (w.wanted.stars > 0 && w.sprayCooldown <= 0 &&
+          Math.hypot(pl.x - (sp.x + sp.w / 2), pl.y - (sp.y + sp.h / 2)) < 80 &&
+          pl.cash >= 100) {
+        pl.cash -= 100;
+        w.wanted.heat = 0; w.wanted.stars = 0;
+        S.Audio.siren.set(false);
+        w.sprayCooldown = 5;
+        w.toast('Pay N Spray — heat cleared, -$100', 3);
+      }
+    } else {
+      S.Player.playerStep(pl, input, dt, w.cars);
+      S.Audio.engine.set(0, false);
+    }
+    // Traffic.
+    for (var ci = 0; ci < w.cars.length; ci++) {
+      var c = w.cars[ci];
+      if (c.dead || c === pl.inCar) continue;
+      S.Vehicles.trafficStep(c, dt, w.cars);
+    }
+    // Replace wrecked / vanished traffic.
+    w.cars = w.cars.filter(function (c) { return !c.dead || c === pl.inCar; });
+    if (w.cars.length < 14 && Math.random() < dt * 0.5) {
+      var extra = S.Vehicles.spawnTraffic(1, pl);
+      if (extra.length) w.cars.push(extra[0]);
+    }
+    // Pedestrians.
+    for (var pi = 0; pi < w.peds.length; pi++) {
+      S.Peds.pedStep(w.peds[pi], dt, w.cars, pl);
+    }
+    w.peds = w.peds.filter(function (p) { return !p.dead; });
+    if (w.peds.length < 22 && Math.random() < dt * 0.8) {
+      var np = S.Peds.spawnPeds(1, pl);
+      if (np.length) w.peds.push(np[0]);
+    }
+    // Police.
+    var px = pl.x, py = pl.y;
+    S.Police.ensurePursuit(w.police, w.wanted, px, py);
+    var anyNear = false;
+    for (var qi = 0; qi < w.police.length; qi++) {
+      var cop = w.police[qi];
+      if (cop.dead) continue;
+      if (cop.onFoot) {
+        S.Police.copFootStep(cop, dt, px, py, w.bullets, !!pl.inCar);
+      } else {
+        S.Police.copCarStep(cop, dt, px, py, pl.angle, w.bullets);
+      }
+      if (Math.hypot(cop.x - px, cop.y - py) < 520) anyNear = true;
+    }
+    // Foot officers join when the player is on foot at 2+ stars.
+    if (w.wanted.stars >= 2 && !pl.inCar) {
+      var foots = w.police.filter(function (p) { return p.onFoot && !p.dead; }).length;
+      if (foots < 2 && Math.random() < dt * 0.3) {
+        var a = Math.random() * Math.PI * 2;
+        w.police.push(S.Police.makeCopFoot(px + Math.cos(a) * 420, py + Math.sin(a) * 420));
+      }
+    }
+    S.Police.wantedStep(w.wanted, dt, anyNear, !anyNear);
+    // Bullets + missions.
+    S.Combat.bulletStep(w.bullets, dt, w);
+    S.Missions.missionStep(w, dt);
+    // Camera follows the player.
+    var tx = Math.max(0, Math.min(City.W - 1280, pl.x - 640));
+    var ty = Math.max(0, Math.min(City.H - 720, pl.y - 360));
+    w.cam.x += (tx - w.cam.x) * Math.min(1, dt * 5);
+    w.cam.y += (ty - w.cam.y) * Math.min(1, dt * 5);
+  }
+
+  function draw() {
+    ctx.save();
+    if (w.state === 'title') {
+      S.HUD.drawTitle(ctx, w);
+    } else {
+      ctx.clearRect(0, 0, 1280, 720);
+      ctx.translate(-Math.round(w.cam.x), -Math.round(w.cam.y));
+      S.Render.drawWorld(ctx, w, w.cam, w.dusk);
+      ctx.restore();
+      ctx.save();
+      S.HUD.drawHUD(ctx, w);
+      if (w.state === 'pause') S.HUD.drawPause(ctx, w);
+      if (w.state === 'end') S.HUD.drawEnd(ctx, w, w.endKind);
+    }
+    ctx.restore();
+  }
+
+  var last = performance.now();
+  var booted = false;
+  function loop(now) {
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    if (w.state === 'play') step(dt);
+    else w.time += dt;
+    draw();
+    if (!booted) {
+      booted = true;
+      document.title = 'SOLMARINA ready';
+      window.__solReady = true;
+    }
+    requestAnimationFrame(loop);
+  }
+
+  // Boot: title screen, or straight into a staged scene for screenshots.
+  if (scene) stageScene(scene);
+  else freshWorld({ x: 800, y: 720 });
+  requestAnimationFrame(loop);
+})();

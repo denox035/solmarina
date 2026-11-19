@@ -1,146 +1,136 @@
-// police.js — wanted level (1–5 stars) + police cars and officers who chase,
-// ram, shoot and arrest. Wanted decays when the player stays hidden and quiet.
-import { hurtPlayer } from './player.js';
-import { buildingAt, inWater, randomRoadPoint } from './city.js';
-import { makeCar } from './vehicles.js';
+// SOLMARINA police: the wanted level, pursuit cars, foot officers, and the
+// busted / escape rules.
+window.SOL = window.SOL || {};
+(function () {
+  var S = window.SOL;
+  var City = S.City;
 
-export function raiseWanted(G, stars, reason) {
-  if (stars > G.wanted) {
-    G.wanted = Math.min(5, stars);
-    G.wantedTimer = 0;
-    G.msg = reason || `Wanted level ${G.wanted} — Solmarina PD is on you!`;
+  function makeWanted() {
+    return { stars: 0, heat: 0, lastSeen: 0, calmT: 0 };
   }
-}
 
-export function crimeCommitted(G, stars, reason) {
-  raiseWanted(G, stars, reason);
-  G.wantedTimer = 0;
-}
-
-export function updatePolice(G, dt) {
-  const p = G.player;
-  // Wanted decays: 20s calm while hidden, 45s calm while visible, never below 0.
-  if (G.wanted > 0) {
-    G.wantedTimer += dt;
-    const calmFor = p.hidden ? 20 : 45;
-    const recentCrime = G.time - G.lastCrimeAt < 6;
-    if (!recentCrime && G.wantedTimer > calmFor) {
-      G.wanted--;
-      G.wantedTimer = 0;
-      G.msg = G.wanted === 0 ? 'You lost them. The heat is off — for now.' : `Heat cooling… wanted level ${G.wanted}.`;
-      if (G.wanted === 0) G.audio.setSiren(false);
-    }
+  function addHeat(wanted, amount, reason) {
+    var before = wanted.stars;
+    wanted.heat += amount;
+    var stars = wanted.heat >= 260 ? 5 : wanted.heat >= 170 ? 4 :
+                wanted.heat >= 100 ? 3 : wanted.heat >= 45 ? 2 :
+                wanted.heat >= 12 ? 1 : 0;
+    wanted.stars = stars;
+    wanted.calmT = 0;
+    if (stars > before) S.Events && S.Events.emit('wantedUp', stars, reason);
   }
-  // Desired police presence scales with stars.
-  const wantCars = G.wanted >= 4 ? 3 : G.wanted >= 2 ? 2 : G.wanted >= 1 ? 1 : 0;
-  const wantPeds = G.wanted >= 3 ? 2 : G.wanted >= 1 ? 1 : 0;
-  const copCars = G.cops.filter(c => c.kind === 'car');
-  const copPeds = G.cops.filter(c => c.kind === 'ped');
-  if (copCars.length < wantCars && G.state === 'play') spawnCopCar(G);
-  if (copPeds.length < wantPeds && G.state === 'play') spawnCopPed(G);
-  // Siren audio while any cop car is active.
-  G.audio.setSiren(copCars.length > 0 && G.wanted > 0);
-  for (const cop of G.cops) {
-    if (cop.kind === 'car') updateCopCar(G, cop, dt);
-    else updateCopPed(G, cop, dt);
-  }
-  // Despawn cops far away once the heat is off.
-  if (G.wanted === 0) {
-    G.cops = G.cops.filter(c => Math.hypot(c.x - p.x, c.y - p.y) < 500);
-  }
-}
 
-function spawnCopCar(G) {
-  const p = G.player;
-  const a = G.rnd() * Math.PI * 2;
-  const x = p.x + Math.cos(a) * 700, y = p.y + Math.sin(a) * 700;
-  const car = makeCar(x, y, 0, { ai: 'police', color: '#1a1a2e', name: 'Interceptor' });
-  car.kind = 'car'; car.hp = 120;
-  G.cars.push(car);
-  G.cops.push(car);
-}
-
-function spawnCopPed(G) {
-  const p = G.player;
-  const a = G.rnd() * Math.PI * 2;
-  const cop = {
-    kind: 'ped', x: p.x + Math.cos(a) * 320, y: p.y + Math.sin(a) * 320,
-    angle: 0, speed: 165, shootCd: 1 + G.rnd(), hp: 50,
-  };
-  G.cops.push(cop);
-}
-
-function updateCopCar(G, car, dt) {
-  const p = G.player;
-  const dx = p.x - car.x, dy = p.y - car.y;
-  const d = Math.hypot(dx, dy);
-  if (d < 1) return;
-  const want = Math.atan2(dy, dx);
-  let diff = want - car.angle;
-  while (diff > Math.PI) diff -= Math.PI * 2;
-  while (diff < -Math.PI) diff += Math.PI * 2;
-  car.angle += Math.max(-3.2 * dt, Math.min(3.2 * dt, diff));
-  // Ram speed: faster at higher wanted levels, but they back off to re-aim.
-  const target = d > 60 ? 300 + G.wanted * 26 : 140;
-  car.speed += (target - car.speed) * Math.min(1, 2 * dt);
-  const nx = car.x + Math.cos(car.angle) * car.speed * dt;
-  const ny = car.y + Math.sin(car.angle) * car.speed * dt;
-  if (!buildingAt(G.city, nx, ny) && !inWater(G.city, nx, ny)) { car.x = nx; car.y = ny; }
-  else { car.angle += Math.PI / 2 * dt * 4; car.speed *= 0.6; }
-  // Ram the player's car or the player on foot. Damage is per-second while in contact.
-  if (d < 44) {
-    if (p.inCar) {
-      p.inCar.hp -= 22 * dt;
-      G.shake = 7;
-      if (p.inCar.hp <= 0) { p.inCar.wrecked = true; p.inCar = null; G.msg = 'Your car was wrecked by the PD!'; }
+  function wantedStep(wanted, dt, policeNear, playerHidden) {
+    if (wanted.stars === 0) return;
+    if (!policeNear && playerHidden) {
+      wanted.calmT += dt;
+      if (wanted.calmT > 14) {
+        wanted.heat = Math.max(0, wanted.heat - dt * 9);
+        var stars = wanted.heat >= 260 ? 5 : wanted.heat >= 170 ? 4 :
+                    wanted.heat >= 100 ? 3 : wanted.heat >= 45 ? 2 :
+                    wanted.heat >= 12 ? 1 : 0;
+        if (stars < wanted.stars) {
+          wanted.stars = stars;
+          S.Events && S.Events.emit('wantedDown', stars);
+        }
+        if (wanted.stars === 0) wanted.calmT = 0;
+      }
     } else {
-      hurtPlayer(G, 10 * dt, 'ram');
-    }
-    car.speed *= 0.5;
-  }
-  // Cops shoot at the player from range at 3+ stars.
-  if (G.wanted >= 3 && d < 420 && d > 70) {
-    car.shootCd = (car.shootCd || 1) - dt;
-    if (car.shootCd <= 0) {
-      car.shootCd = 0.9;
-      G.bullets.push({
-        x: car.x, y: car.y, angle: want + (G.rnd() - 0.5) * 0.2,
-        speed: 620, life: 0.9, from: 'cop', dmg: 6,
-      });
-      G.audio.shot();
+      wanted.calmT = 0;
     }
   }
-}
 
-function updateCopPed(G, cop, dt) {
-  const p = G.player;
-  const dx = p.x - cop.x, dy = p.y - cop.y;
-  const d = Math.hypot(dx, dy);
-  if (d < 1) return;
-  cop.angle = Math.atan2(dy, dx);
-  // Arrest: a cop who reaches a weak player on foot busts them.
-  if (d < 30 && !p.inCar) {
-    if (p.hp < 35) {
-      hurtPlayer(G, 999, 'arrest');
-      G.audio.arrest();
-      return;
+  function makeCopCar(x, y, angle) {
+    var model = { name: 'Interceptor', color: '#1c2f4d', len: 40, wid: 19,
+      accel: 360, top: 540, turn: 3.5, hp: 150 };
+    var car = S.Vehicles.makeCar(x, y, angle, model, 'police');
+    car.sirenT = Math.random() * 10;
+    return car;
+  }
+
+  function makeCopFoot(x, y) {
+    return { x: x, y: y, angle: 0, onFoot: true, hp: 68, dead: false,
+      shootT: 1 + Math.random(), speed: 120 };
+  }
+
+  // Pursuit: steer hard at the player, ram to damage, and at 3+ stars shoot
+  // from the window when close.
+  function copCarStep(car, dt, px, py, pAngle, bullets) {
+    var want = Math.atan2(py - car.y, px - car.x);
+    var diff = S.Vehicles.angleDiff(car.angle, want);
+    var steer = Math.max(-1, Math.min(1, diff * 2.6));
+    var dist = Math.hypot(px - car.x, py - car.y);
+    var throttle = dist > 60 ? 1 : 0.7;
+    S.Vehicles.drive(car, throttle, steer, dt);
+    // Ram damage.
+    if (dist < 46) {
+      S.Events && S.Events.emit('ram', car, dist);
     }
-    hurtPlayer(G, 8 * dt * 4, 'arrest');
-    return;
+    // Shoot out of the window at 3+ stars when close and roughly facing.
+    if (bullets && dist < 320 && Math.abs(diff) < 0.5) {
+      car.shootT = (car.shootT || 0) - dt;
+      if (car.shootT <= 0) {
+        car.shootT = 1.1 + Math.random() * 0.7;
+        var a = Math.atan2(py - car.y, px - car.x) + (Math.random() - 0.5) * 0.22;
+        S.Combat.fireBullet(bullets, car.x, car.y, a, 'police');
+        S.Audio.shot();
+      }
+    }
   }
-  // Chase on foot; shoot from mid-range.
-  if (d > 60) {
-    const nx = cop.x + Math.cos(cop.angle) * cop.speed * dt;
-    const ny = cop.y + Math.sin(cop.angle) * cop.speed * dt;
-    if (!buildingAt(G.city, nx, ny) && !inWater(G.city, nx, ny)) { cop.x = nx; cop.y = ny; }
+
+  function copFootStep(cop, dt, px, py, bullets, playerInCar) {
+    if (cop.dead) return;
+    var dist = Math.hypot(px - cop.x, py - cop.y);
+    cop.angle = Math.atan2(py - cop.y, px - cop.x);
+    if (dist > 190) {
+      var pos = City.moveWithCollision(cop.x, cop.y,
+        Math.cos(cop.angle) * cop.speed * dt, Math.sin(cop.angle) * cop.speed * dt, 10);
+      cop.x = pos.x; cop.y = pos.y;
+    } else if (dist < 60 && !playerInCar) {
+      // Close enough to grab the player: busted.
+      S.Events && S.Events.emit('busted', cop);
+    }
+    if (dist < 340 && !playerInCar) {
+      cop.shootT -= dt;
+      if (cop.shootT <= 0) {
+        cop.shootT = 1.3 + Math.random() * 0.8;
+        var a = Math.atan2(py - cop.y, px - cop.x) + (Math.random() - 0.5) * 0.25;
+        S.Combat.fireBullet(bullets, cop.x, cop.y, a, 'police');
+        S.Audio.shot();
+      }
+    }
   }
-  cop.shootCd -= dt;
-  if (d < 380 && cop.shootCd <= 0) {
-    cop.shootCd = 1.1;
-    G.bullets.push({
-      x: cop.x, y: cop.y, angle: cop.angle + (G.rnd() - 0.5) * 0.16,
-      speed: 620, life: 0.9, from: 'cop', dmg: 5,
-    });
-    G.audio.shot();
+
+  // Keep the right number of pursuit cars for the wanted level.
+  function ensurePursuit(police, wanted, px, py) {
+    var want = wanted.stars === 0 ? 0 : wanted.stars <= 1 ? 1 :
+              wanted.stars <= 2 ? 2 : wanted.stars <= 3 ? 3 : 4;
+    var cars = police.filter(function (p) { return !p.onFoot && !p.dead; });
+    while (cars.length < want) {
+      var a = Math.random() * Math.PI * 2;
+      var d = 620 + Math.random() * 260;
+      var x = px + Math.cos(a) * d, y = py + Math.sin(a) * d;
+      var p = City.nearestIntersection(x, y);
+      if (p) { x = p.x; y = p.y; }
+      x = Math.max(60, Math.min(City.W - 60, x));
+      y = Math.max(60, Math.min(City.H - 60, y));
+      var car = makeCopCar(x, y, Math.atan2(py - y, px - x));
+      police.push(car);
+      cars.push(car);
+    }
+    // Despawn far-away or dead pursuit cars when the heat is gone.
+    for (var i = police.length - 1; i >= 0; i--) {
+      var c = police[i];
+      if (!c.onFoot && (c.dead || (wanted.stars === 0 && Math.hypot(c.x - px, c.y - py) > 900))) {
+        police.splice(i, 1);
+      }
+      if (c.onFoot && c.dead) police.splice(i, 1);
+    }
   }
-}
+
+  S.Police = {
+    makeWanted: makeWanted, addHeat: addHeat, wantedStep: wantedStep,
+    makeCopCar: makeCopCar, makeCopFoot: makeCopFoot,
+    copCarStep: copCarStep, copFootStep: copFootStep, ensurePursuit: ensurePursuit
+  };
+})();
