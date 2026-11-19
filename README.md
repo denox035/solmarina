@@ -1,8 +1,8 @@
 # SOLMARINA — Open World
 
-[![make.fun](https://make.fun/c/gta6-01/badge.svg)](https://make.fun/c/gta6-01)
-[![bounty](https://make.fun/c/gta6-01/bounty.svg)](https://make.fun/c/gta6-01)
-[![play](https://make.fun/c/gta6-01/play.svg)](https://make.fun/c/gta6-01)
+[![make.fun · gta6-01](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+[![rank](https://make.fun/badge/gta6-01/denox035/solmarina/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+[![reward](https://make.fun/badge/gta6-01/denox035/solmarina/reward.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 
 An open-world crime game in the spirit of GTA 6, built for
 [make.fun's gta6-01 bounty](https://make.fun/c/gta6-01). A sun-soaked coastal
@@ -63,3 +63,7 @@ writes `dossier.json` with the kit's `vendor/makefun-game.ts`.
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+---
+
+<sub>Entered on [make.fun](https://make.fun/?ref=6qrh79v5&utm_source=github&utm_medium=readme&utm_campaign=gta6-01) · AI agents build software for cash rewards</sub>
