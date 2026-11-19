@@ -1,166 +1,134 @@
-// SOLMARINA missions: Mara Voss's story chain — six jobs across the city,
-// each with an objective, a marker, a timer and a payout.
-window.SOL = window.SOL || {};
-(function () {
-  var S = window.SOL;
-  var City = S.City;
+// missions.js — six jobs for Mara Voss, chained in order. Each mission has
+// a briefing, a target point on the map, an optional timer, and a payout.
+// Finish one to unlock the next; the last one is the Solmarina Job.
 
-  function markerAt(x, y, label) { return { x: x, y: y, label: label }; }
+const MISSIONS = [
+  {
+    id: 1, name: 'First Wheels',
+    brief: 'Mara needs wheels. Steal any car on the street and bring it to the Coral Park lot.',
+    target: { x: 1280, y: 700 }, payout: 300, timer: 0,
+    check: (G) => G.player.inCar ? 'done' : null,
+  },
+  {
+    id: 2, name: 'Sunset Courier',
+    brief: 'A package for the Sunset Pier. Drive it there before the sun sets — 90 seconds.',
+    target: { x: 120, y: 960 }, payout: 600, timer: 90,
+    check: (G) => (G.player.inCar && dist2(G.player.x, G.player.y, 120, 960) < 90 * 90) ? 'done' : null,
+  },
+  {
+    id: 3, name: 'The Getaway',
+    brief: 'The Grand tipped off the cops. Lose a 2-star wanted level — break line of sight and stay quiet.',
+    target: null, payout: 800, timer: 0,
+    start: (G) => { raiseWanted(G, 2); },
+    check: (G) => G.wanted === 0 ? 'done' : null,
+  },
+  {
+    id: 4, name: 'Dockside Deal',
+    brief: 'Pick up the crate at Marina Docks, then drop it at the Shipyard. No questions.',
+    target: { x: 2160, y: 1680 }, payout: 1000, timer: 150,
+    start: (G) => {
+      G.missionStops = [{ x: 2160, y: 1680 }, { x: 480, y: 1680 }];
+      G.missionStop = 0;
+    },
+    check: (G) => {
+      const stops = G.missionStops || [];
+      const next = stops[G.missionStop || 0];
+      if (!next) return 'done';
+      if (dist2(G.player.x, G.player.y, next.x, next.y) < 100 * 100) {
+        G.missionStop++;
+        AudioSys.pickup();
+        G.toast = next === stops[0] ? 'Crate picked up — now the Shipyard' : 'Drop complete';
+        if (G.missionStop >= stops.length) return 'done';
+      }
+      return null;
+    },
+  },
+  {
+    id: 5, name: 'Grand Heist Prep',
+    brief: 'The Solmarina Grand keeps a gold Comet out back. Steal that exact car.',
+    target: { x: 1760, y: 1330 }, payout: 1500, timer: 0,
+    start: (G) => {
+      const car = makeCar(1760, 1330, 0, { color: '#f1c40f', name: 'Comet' });
+      car.isTraffic = false;
+      G.cars.push(car);
+      G.missionCar = car;
+    },
+    check: (G) => (G.missionCar && G.player.inCar === G.missionCar) ? 'done' : null,
+  },
+  {
+    id: 6, name: 'The Solmarina Job',
+    brief: 'The big one: hit Meridian Tower, then the Grand, then vanish at the pier. Three stops, four minutes.',
+    target: { x: 1440, y: 480 }, payout: 5000, timer: 240,
+    check: (G) => {
+      const stops = G.missionStops || [];
+      const next = stops[G.missionStop || 0];
+      if (!next) return 'done';
+      if (dist2(G.player.x, G.player.y, next.x, next.y) < 100 * 100) {
+        G.missionStop++;
+        AudioSys.pickup();
+        G.toast = 'Stop cleared — ' + (stops.length - G.missionStop) + ' to go';
+        if (G.missionStop >= stops.length) return 'done';
+      }
+      return null;
+    },
+    start: (G) => {
+      G.missionStops = [{ x: 1440, y: 480 }, { x: 1760, y: 1200 }, { x: 120, y: 960 }];
+      G.missionStop = 0;
+    },
+  },
+];
 
-  var MISSIONS = [
-    {
-      id: 'first-wheels', title: 'First Wheels', pay: 300,
-      brief: 'Mara needs wheels. Steal any car and bring it to her garage.',
-      start: function (w) {
-        return { target: markerAt(City.garage.x + 60, City.garage.y + 35, "Mara's Garage"),
-          needCar: true, done: false };
-      },
-      check: function (w, st) {
-        return w.player.inCar && Math.hypot(w.player.x - st.target.x, w.player.y - st.target.y) < 90;
-      }
-    },
-    {
-      id: 'sunset-courier', title: 'Sunset Courier', pay: 500, time: 100,
-      brief: 'A package for the Grand. Drive it to the casino before the clock runs out.',
-      start: function (w) {
-        return { target: markerAt(City.casino.x + 80, City.casino.y + 40, 'Solmarina Grand'),
-          done: false };
-      },
-      check: function (w, st) {
-        return Math.hypot(w.player.x - st.target.x, w.player.y - st.target.y) < 90;
-      }
-    },
-    {
-      id: 'marina-meet', title: 'Marina Meet', pay: 650, time: 120,
-      brief: 'Pick up the courier at the marina, then lose the cops tailing you.',
-      start: function (w) {
-        return { target: markerAt(City.MARINA_X + 60, 720, 'Marina Docks'),
-          phase: 0, done: false };
-      },
-      check: function (w, st) {
-        if (st.phase === 0) {
-          if (Math.hypot(w.player.x - st.target.x, w.player.y - st.target.y) < 80) {
-            st.phase = 1;
-            S.Police.addHeat(w.wanted, 50, 'marina meet');
-            w.toast('Cops on you — lose them!', 3);
-          }
-          return false;
-        }
-        return w.wanted.stars === 0;
-      }
-    },
-    {
-      id: 'park-pickup', title: 'Park Pickup', pay: 450, time: 110,
-      brief: 'Three drops hidden in Coral Park. Grab them all on foot — stay out of sight.',
-      start: function (w) {
-        var drops = [];
-        for (var i = 0; i < 3; i++) {
-          drops.push(markerAt(
-            City.park.x + 40 + Math.random() * (City.park.w - 80),
-            City.park.y + 40 + Math.random() * (City.park.h - 80), 'Drop ' + (i + 1)));
-        }
-        return { drops: drops, got: 0, done: false };
-      },
-      check: function (w, st) {
-        for (var i = 0; i < st.drops.length; i++) {
-          var d = st.drops[i];
-          if (!d.got && Math.hypot(w.player.x - d.x, w.player.y - d.y) < 34) {
-            d.got = true; st.got++;
-            S.Audio.pickup();
-            w.toast('Drop ' + st.got + '/3 collected', 2);
-          }
-        }
-        return st.got >= 3;
-      }
-    },
-    {
-      id: 'downtown-getaway', title: 'Downtown Getaway', pay: 800, time: 120,
-      brief: 'You tripped the Meridian alarm. Lose a 3-star wanted level — fast.',
-      start: function (w) {
-        S.Police.addHeat(w.wanted, 110, 'meridian alarm');
-        return { target: markerAt(City.garage.x + 60, City.garage.y + 35, 'Lay low at the garage'),
-          done: false };
-      },
-      check: function (w, st) {
-        return w.wanted.stars === 0 &&
-          Math.hypot(w.player.x - st.target.x, w.player.y - st.target.y) < 120;
-      }
-    },
-    {
-      id: 'solmarina-job', title: 'The Solmarina Job', pay: 2500, time: 180,
-      brief: 'The case is in the Meridian Tower. Grab it, dodge a 4-star response, deliver it to the yacht.',
-      start: function (w) {
-        return { target: markerAt(City.tower.x, City.tower.y + 80, 'Meridian Tower'),
-          phase: 0, done: false };
-      },
-      check: function (w, st) {
-        if (st.phase === 0) {
-          if (Math.hypot(w.player.x - st.target.x, w.player.y - st.target.y) < 80) {
-            st.phase = 1;
-            st.target = markerAt(City.MARINA_X + 80, 1200, 'The Yacht');
-            S.Police.addHeat(w.wanted, 180, 'the job');
-            w.toast('Got the case — run to the yacht!', 3);
-          }
-          return false;
-        }
-        return Math.hypot(w.player.x - st.target.x, w.player.y - st.target.y) < 90;
-      }
-    }
-  ];
-
-  function makeMissions() {
-    return { index: 0, state: null, timer: 0, active: false, failed: false };
+function missionTarget(G) {
+  const m = G.mission;
+  if (!m) return null;
+  if (G.missionStops) {
+    const stops = G.missionStops || [];
+    return stops[G.missionStop || 0] || null;
   }
+  return m.target;
+}
 
-  function startMission(w) {
-    var m = w.missions;
-    if (m.index >= MISSIONS.length) return false;
-    var def = MISSIONS[m.index];
-    m.state = def.start(w);
-    m.timer = def.time || 0;
-    m.active = true;
-    m.failed = false;
-    w.toast('Mission: ' + def.title + ' — ' + def.brief, 5);
-    return true;
-  }
+function startMission(G, index) {
+  const def = MISSIONS[index];
+  if (!def) return false;
+  G.mission = def;
+  G.missionTime = def.timer || 0;
+  G.missionStop = 0;
+  G.missionStops = null;
+  G.missionCar = null;
+  G.toast = def.name + ' — ' + def.brief;
+  if (def.start) def.start(G);
+  return true;
+}
 
-  function missionStep(w, dt) {
-    var m = w.missions;
-    if (!m.active || !m.state) return;
-    var def = MISSIONS[m.index];
-    if (def.time) {
-      m.timer -= dt;
-      if (m.timer <= 0) {
-        m.active = false; m.failed = true;
-        S.Audio.missionFail();
-        w.toast('Mission failed: ' + def.title + ' — time ran out', 4);
-        S.Events && S.Events.emit('missionFailed', def);
-        return;
-      }
-    }
-    if (def.check(w, m.state)) {
-      m.active = false;
-      w.player.cash += def.pay;
-      w.player.missionsDone++;
-      S.Audio.missionOk();
-      w.toast('Mission complete: ' + def.title + '  +$' + def.pay, 4);
-      S.Events && S.Events.emit('missionDone', def);
-      m.index++;
-      if (m.index >= MISSIONS.length) {
-        w.player.storyDone = true;
-        w.player.cash += 1000;
-        w.toast('STORY COMPLETE — Solmarina is yours. +$1000 bonus', 6);
-      }
-      S.Save && S.Save.save(w);
+function updateMission(G, dt) {
+  const m = G.mission;
+  if (!m) return;
+  if (m.timer > 0) {
+    G.missionTime -= dt;
+    if (G.missionTime <= 0) {
+      G.missionTime = 0;
+      G.mission = null;
+      G.toast = 'Too slow — ' + m.name + ' failed. Press M to retry.';
+      G.failedMission = MISSIONS.indexOf(m);
+      AudioSys.busted();
+      return;
     }
   }
-
-  function currentDef(m) {
-    return m.index < MISSIONS.length ? MISSIONS[m.index] : null;
+  const result = m.check(G);
+  if (result === 'done') {
+    addCash(G.player, m.payout);
+    AudioSys.cash();
+    G.toast = m.name + ' complete — +$' + m.payout;
+    G.completedMissions = (G.completedMissions || 0) + 1;
+    G.mission = null;
+    G.failedMission = null;
+    G.lastCompleted = MISSIONS.indexOf(m);
   }
+}
 
-  S.Missions = {
-    MISSIONS: MISSIONS, makeMissions: makeMissions,
-    startMission: startMission, missionStep: missionStep, currentDef: currentDef
-  };
-})();
+function nextMissionIndex(G) {
+  if (G.failedMission !== null && G.failedMission !== undefined) return G.failedMission;
+  if (G.lastCompleted === null || G.lastCompleted === undefined) return 0;
+  return Math.min(G.lastCompleted + 1, MISSIONS.length - 1);
+}

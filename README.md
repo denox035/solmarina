@@ -5,9 +5,9 @@
 [![reward](https://make.fun/badge/gta6-01/denox035/solmarina/reward.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 
 An open-world crime game in the spirit of GTA 6, built for
-[make.fun's gta6-01 bounty](https://make.fun/c/gta6-01). A sun-soaked coastal
-city of its own — original streets, characters, vehicles, story, art and
-sound, nothing from any commercial game.
+[make.fun's gta6-01 bounty](https://make.fun/bounty/gta6-01). A sun-soaked
+coastal city of its own — original streets, characters, vehicles, story, art
+and sound, nothing from any commercial game.
 
 ## The city
 
@@ -21,13 +21,15 @@ steal any car off the street and drive.
   pedestrians on the sidewalks.
 - **Wanted level** — 0 to 5 stars. Steal a car, hit a pedestrian or shoot and
   the Solmarina PD responds: pursuit cars that ram, foot officers that shoot,
-  and a heat level that only cools when you break line of sight. Drive
-  through Pay N Spray to clear it for $100.
+  and a heat level that only cools when you break line of sight. Steal a car
+  and the law notices; a traffic car hitting a pedestrian is never your fault.
 - **Missions** — six jobs for Mara Voss, from stealing your first wheels to
   the Solmarina Job at the Meridian Tower, each with a timer and a payout.
 - **Combat** — fists and a pistol with mouse aim, reloads, car wrecks.
 - **HUD** — wanted stars, health, cash, clock, speed, mission objective and
   a live minimap.
+- **Sound** — every sound is synthesised live with WebAudio: engine hum,
+  two-tone sirens, gunshots, pickups and a bass line.
 - **Save** — progress (cash, jobs done, position) persists in localStorage.
 
 ## Controls
@@ -40,6 +42,7 @@ steal any car off the street and drive.
 | F | Punch |
 | Click | Shoot (pistol) |
 | 1 / 2 | Fists / pistol |
+| R | Reload |
 | M | Start next mission |
 | P / Esc | Pause |
 | N | Mute |

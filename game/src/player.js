@@ -1,101 +1,87 @@
-// SOLMARINA player: on-foot movement, stealing and driving cars, health,
-// cash and the busted / wasted flow.
-window.SOL = window.SOL || {};
-(function () {
-  var S = window.SOL;
-  var City = S.City;
+// player.js — Mara Voss, driver for hire. On foot she walks, punches and
+// shoots; near a car she can steal it (E) and drive; she can bail out (E)
+// while moving slowly. Health, cash and the busted/wasted states live here.
 
-  function makePlayer(x, y) {
-    return {
-      x: x, y: y, angle: -Math.PI / 2,
-      hp: 100, maxHp: 100, cash: 250,
-      inCar: null, onFoot: true,
-      speed: 0, walkPhase: 0,
-      weapon: 'fists', ammo: 12, reloadT: 0,
-      punchT: 0, hurtT: 0, dead: false,
-      missionsDone: 0, storyDone: false
-    };
-  }
-
-  function playerStep(pl, input, dt, cars) {
-    if (pl.dead) return;
-    if (pl.hurtT > 0) pl.hurtT -= dt;
-    if (pl.punchT > 0) pl.punchT -= dt;
-    if (pl.reloadT > 0) {
-      pl.reloadT -= dt;
-      if (pl.reloadT <= 0) pl.ammo = 12;
-    }
-    if (pl.inCar) return; // driving is handled by Vehicles.drive in main
-    var run = input.shift ? 1.6 : 1;
-    var mx = (input.right ? 1 : 0) - (input.left ? 1 : 0);
-    var my = (input.down ? 1 : 0) - (input.up ? 1 : 0);
-    if (mx !== 0 || my !== 0) {
-      var len = Math.hypot(mx, my);
-      mx /= len; my /= len;
-      var sp = 165 * run;
-      var pos = City.moveWithCollision(pl.x, pl.y, mx * sp * dt, my * sp * dt, 11);
-      pl.x = pos.x; pl.y = pos.y;
-      pl.angle = Math.atan2(my, mx);
-      pl.walkPhase += dt * sp * 0.06;
-      pl.speed = sp;
-    } else {
-      pl.speed = 0;
-    }
-  }
-
-  function tryEnterCar(pl, cars) {
-    if (pl.inCar) return null;
-    var car = S.Vehicles.nearestCar(pl.x, pl.y, cars, 64);
-    if (!car) return null;
-    pl.inCar = car;
-    car.kind = 'player';
-    car.speed = 0;
-    S.Audio.steal();
-    S.Events && S.Events.emit('carStolen', car);
-    return car;
-  }
-
-  function exitCar(pl) {
-    if (!pl.inCar) return;
-    var car = pl.inCar;
-    var side = Math.cos(car.angle + Math.PI / 2), sideY = Math.sin(car.angle + Math.PI / 2);
-    var px = car.x + side * 26, py = car.y + sideY * 26;
-    if (City.isBlocked(px, py, 11)) { px = car.x - side * 26; py = car.y - sideY * 26; }
-    pl.x = px; pl.y = py;
-    pl.angle = car.angle;
-    pl.inCar = null;
-    car.kind = 'traffic';
-    car.speed = 0;
-  }
-
-  function hurtPlayer(pl, dmg, fromX, fromY) {
-    if (pl.dead || pl.hurtT > 0) return;
-    pl.hp -= dmg;
-    pl.hurtT = 0.5;
-    if (fromX !== undefined) {
-      var d = Math.hypot(pl.x - fromX, pl.y - fromY) || 1;
-      pl.x += (pl.x - fromX) / d * 8;
-      pl.y += (pl.y - fromY) / d * 8;
-    }
-    if (pl.hp <= 0) {
-      pl.hp = 0;
-      pl.dead = true;
-      if (pl.inCar) { pl.inCar.kind = 'traffic'; pl.inCar = null; }
-      S.Events && S.Events.emit('playerDown', pl);
-    }
-  }
-
-  function respawn(pl, place) {
-    pl.hp = pl.maxHp;
-    pl.dead = false;
-    pl.x = place.x; pl.y = place.y;
-    pl.angle = -Math.PI / 2;
-    pl.inCar = null;
-  }
-
-  S.Player = {
-    makePlayer: makePlayer, playerStep: playerStep,
-    tryEnterCar: tryEnterCar, exitCar: exitCar,
-    hurtPlayer: hurtPlayer, respawn: respawn
+function makePlayer(x, y) {
+  return {
+    x, y,
+    angle: -Math.PI / 2,
+    speed: 0,
+    hp: 100,
+    cash: 250,
+    ammo: 24,
+    weapon: 'fists', // fists | pistol
+    inCar: null,
+    state: 'alive', // alive | busted | wasted
+    punchCooldown: 0,
+    shootCooldown: 0,
+    invuln: 0,
   };
-})();
+}
+
+function updatePlayerOnFoot(p, input, dt, city) {
+  const walk = 185;
+  let mx = (input.right ? 1 : 0) - (input.left ? 1 : 0);
+  let my = (input.down ? 1 : 0) - (input.up ? 1 : 0);
+  if (input.run) { mx *= 1.6; my *= 1.6; }
+  const len = Math.sqrt(mx * mx + my * my);
+  if (len > 0) {
+    mx /= len; my /= len;
+    p.angle = Math.atan2(my, mx);
+    const nx = p.x + mx * walk * (input.run ? 1.6 : 1) * dt;
+    const ny = p.y + my * walk * (input.run ? 1.6 : 1) * dt;
+    if (!pointInBuilding(city, nx, p.y, 8) && !isWater(nx, p.y)) p.x = nx;
+    if (!pointInBuilding(city, p.x, ny, 8) && !isWater(p.x, ny)) p.y = ny;
+    p.speed = walk;
+  } else {
+    p.speed = 0;
+  }
+  p.x = clamp(p.x, 40, WORLD_W - 40);
+  p.y = clamp(p.y, 40, WORLD_H - 40);
+  p.punchCooldown = Math.max(0, p.punchCooldown - dt);
+  p.shootCooldown = Math.max(0, p.shootCooldown - dt);
+  p.invuln = Math.max(0, p.invuln - dt);
+}
+
+// Find the closest car the player could steal, within reach.
+function nearestStealableCar(p, cars) {
+  let best = null, bd = 70 * 70;
+  for (const car of cars) {
+    if (car.isCop) continue;
+    if (car.hp <= 0) continue;
+    const d = dist2(p.x, p.y, car.x, car.y);
+    if (d < bd) { bd = d; best = car; }
+  }
+  return best;
+}
+
+function enterCar(p, car) {
+  car.isPlayer = true;
+  car.isTraffic = false;
+  p.inCar = car;
+  p.x = car.x; p.y = car.y;
+  return car;
+}
+
+function exitCar(p) {
+  const car = p.inCar;
+  if (!car) return null;
+  car.isPlayer = false;
+  car.isTraffic = false; // parked where the player left it
+  car.speed = 0;
+  const side = p.angle + Math.PI / 2;
+  p.x = car.x + Math.cos(side) * 34;
+  p.y = car.y + Math.sin(side) * 34;
+  p.inCar = null;
+  return car;
+}
+
+function hurtPlayer(p, amount) {
+  if (p.invuln > 0 || p.state !== 'alive') return false;
+  p.hp -= amount;
+  p.invuln = 0.5;
+  if (p.hp <= 0) { p.hp = 0; p.state = 'wasted'; return true; }
+  return false;
+}
+
+function addCash(p, amount) { p.cash += amount; return p.cash; }

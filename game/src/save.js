@@ -1,56 +1,44 @@
-// SOLMARINA save: progress persists in localStorage — cash, missions, story
-// state and the player's last position.
-window.SOL = window.SOL || {};
-(function () {
-  var S = window.SOL;
-  var KEY = 'solmarina-save-v1';
+// save.js — progress persists in localStorage: cash, jobs finished, the
+// player's position and the clock. Busted or wasted, Mara keeps her cash.
 
-  function save(w) {
-    try {
-      var data = {
-        cash: w.player.cash,
-        hp: w.player.hp,
-        missionsDone: w.player.missionsDone,
-        missionIndex: w.missions.index,
-        storyDone: w.player.storyDone,
-        x: w.player.x, y: w.player.y,
-        clock: w.clockMinutes
-      };
-      window.localStorage.setItem(KEY, JSON.stringify(data));
-      return true;
-    } catch (e) { return false; }
-  }
+const SAVE_KEY = 'solmarina-save-v1';
 
-  function load() {
-    try {
-      var raw = window.localStorage.getItem(KEY);
-      if (!raw) return null;
-      return JSON.parse(raw);
-    } catch (e) { return null; }
-  }
-
-  function exists() {
-    try { return !!window.localStorage.getItem(KEY); }
-    catch (e) { return false; }
-  }
-
-  function clear() {
-    try { window.localStorage.removeItem(KEY); } catch (e) {}
-  }
-
-  function applySave(w, data) {
-    if (!data) return false;
-    w.player.cash = data.cash;
-    w.player.hp = data.hp;
-    w.player.missionsDone = data.missionsDone || 0;
-    w.missions.index = data.missionIndex || 0;
-    w.player.storyDone = !!data.storyDone;
-    if (data.x !== undefined && data.y !== undefined) {
-      w.player.x = data.x; w.player.y = data.y;
-    }
-    if (data.clock !== undefined) w.clockMinutes = data.clock;
+function saveGame(G) {
+  try {
+    const p = G.player;
+    const data = {
+      cash: p.cash,
+      completed: G.completedMissions || 0,
+      lastCompleted: (G.lastCompleted === undefined || G.lastCompleted === null) ? -1 : G.lastCompleted,
+      x: p.x, y: p.y,
+      clockMin: G.clockMin || 8 * 60,
+      savedAt: Date.now(),
+    };
+    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
     return true;
-  }
+  } catch (e) { return false; }
+}
 
-  S.Save = { save: save, load: load, exists: exists, clear: clear, applySave: applySave };
-})();
+function loadGame() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    if (typeof data.cash !== 'number') return null;
+    return data;
+  } catch (e) { return null; }
+}
+
+function applySave(G, data) {
+  if (!data) return;
+  G.player.cash = data.cash;
+  G.completedMissions = data.completed || 0;
+  G.lastCompleted = data.lastCompleted >= 0 ? data.lastCompleted : null;
+  G.player.x = clamp(data.x || 1280, 40, WORLD_W - 40);
+  G.player.y = clamp(data.y || 840, 40, WORLD_H - 40);
+  G.clockMin = data.clockMin || 8 * 60;
+}
+
+function clearSave() {
+  try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* private mode */ }
+}

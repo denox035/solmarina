@@ -1,1 +1,1 @@
-[{"name":"1-drive.jpg","query":"?scene=drive"},{"name":"2-chase.jpg","query":"?scene=chase"},{"name":"3-mission.jpg","query":"?scene=mission"},{"name":"4-combat.jpg","query":"?scene=combat"}]
+[{"name":"1-drive.jpg","query":"?scene=drive&seed=1"},{"name":"2-chase.jpg","query":"?scene=chase&seed=1"},{"name":"3-mission.jpg","query":"?scene=mission&seed=1"},{"name":"4-combat.jpg","query":"?scene=combat&seed=1"}]

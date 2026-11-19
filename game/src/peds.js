@@ -1,92 +1,85 @@
-// SOLMARINA pedestrians: sidewalk walkers with panic behaviour — they flee
-// gunfire and speeding cars, and they remember being hit.
-window.SOL = window.SOL || {};
-(function () {
-  var S = window.SOL;
-  var City = S.City;
+// peds.js — pedestrians. They stroll the sidewalks, cross at junctions,
+// and run away from gunfire and speeding cars. Only the PLAYER's actions
+// raise the wanted level: a traffic car hitting a pedestrian is the
+// traffic's fault, never the player's.
 
-  var SHIRTS = ['#e85d75', '#4a90d9', '#f2a541', '#7bc47f', '#9b59b6', '#e8e8e8', '#34495e', '#ff8c69'];
-  var SKINS = ['#f1c27d', '#e0ac69', '#c68642', '#8d5524', '#ffdbac'];
+const PED_SHIRTS = ['#e74c3c', '#3498db', '#f39c12', '#9b59b6', '#1abc9c', '#ecf0f1', '#e67e22', '#95a5a6'];
+const PED_NAMES = ['Ana', 'Beto', 'Celia', 'Dario', 'Elsa', 'Felix', 'Greta', 'Hugo', 'Ines', 'Jorge', 'Kira', 'Leo', 'Mina', 'Nico'];
 
-  function makePed(x, y) {
-    var onRoad = City.isRoad(x, y);
-    return {
-      x: x, y: y, angle: Math.random() * Math.PI * 2,
-      speed: 26 + Math.random() * 22, state: 'walk',
-      shirt: SHIRTS[Math.floor(Math.random() * SHIRTS.length)],
-      skin: SKINS[Math.floor(Math.random() * SKINS.length)],
-      panic: 0, target: null, dead: false, hitFlash: 0,
-      stepPhase: Math.random() * Math.PI * 2
-    };
+let pedSeq = 0;
+function makePed(x, y) {
+  pedSeq++;
+  return {
+    id: pedSeq,
+    x, y,
+    angle: Math.random() * Math.PI * 2,
+    speed: 28 + Math.random() * 30,
+    shirt: PED_SHIRTS[pedSeq % PED_SHIRTS.length],
+    name: PED_NAMES[pedSeq % PED_NAMES.length],
+    state: 'walk', // walk | flee | down
+    target: null,
+    panic: 0,
+    down: 0,
+  };
+}
+
+function spawnPeds(count, city) {
+  const list = [];
+  for (let i = 0; i < count; i++) {
+    const p = randomRoadPoint(Math.random);
+    // Keep pedestrians on the sidewalk, just off the road centre.
+    p.x += (Math.random() < 0.5 ? -1 : 1) * (ROAD_W / 2 + 12 + Math.random() * 30);
+    list.push(makePed(clamp(p.x, 60, WORLD_W - 60), clamp(p.y, 60, WORLD_H - 60)));
   }
+  return list;
+}
 
-  function spawnPeds(n, avoid) {
-    var peds = [];
-    for (var i = 0; i < n; i++) {
-      var p = City.randomRoadPoint();
-      // Push the walker onto the sidewalk edge of the road.
-      p.x += (Math.random() < 0.5 ? -1 : 1) * (City.ROAD_W / 2 + 8);
-      if (avoid && Math.hypot(p.x - avoid.x, p.y - avoid.y) < 200) { i--; continue; }
-      peds.push(makePed(p.x, p.y));
-    }
-    return peds;
+function updatePed(ped, dt, city, danger) {
+  if (ped.state === 'down') {
+    ped.down -= dt;
+    if (ped.down <= 0) { ped.state = 'walk'; ped.panic = 0; }
+    return;
   }
-
-  function scare(peds, x, y, radius) {
-    for (var i = 0; i < peds.length; i++) {
-      var p = peds[i];
-      if (p.dead) continue;
-      var d = Math.hypot(p.x - x, p.y - y);
-      if (d < radius) {
-        p.state = 'panic';
-        p.panic = 2.5 + Math.random();
-        p.angle = Math.atan2(p.y - y, p.x - x);
-      }
-    }
+  if (danger && dist2(ped.x, ped.y, danger.x, danger.y) < 220 * 220) {
+    ped.state = 'flee';
+    ped.panic = 2.5;
   }
+  if (ped.state === 'flee') {
+    ped.panic -= dt;
+    const away = Math.atan2(ped.y - (danger ? danger.y : ped.y), ped.x - (danger ? danger.x : ped.x));
+    ped.angle = angleLerp(ped.angle, away, clamp(6 * dt, 0, 1));
+    ped.x += Math.cos(ped.angle) * 150 * dt;
+    ped.y += Math.sin(ped.angle) * 150 * dt;
+    if (ped.panic <= 0) ped.state = 'walk';
+  } else {
+    if (!ped.target) ped.target = randomRoadPoint(Math.random);
+    const dx = ped.target.x - ped.x, dy = ped.target.y - ped.y;
+    const d = Math.sqrt(dx * dx + dy * dy);
+    if (d < 20) { ped.target = randomRoadPoint(Math.random); return; }
+    ped.angle = angleLerp(ped.angle, Math.atan2(dy, dx), clamp(4 * dt, 0, 1));
+    ped.x += Math.cos(ped.angle) * ped.speed * dt;
+    ped.y += Math.sin(ped.angle) * ped.speed * dt;
+  }
+  ped.x = clamp(ped.x, 50, WORLD_W - 50);
+  ped.y = clamp(ped.y, 50, WORLD_H - 50);
+  if (pointInBuilding(city, ped.x, ped.y, 4)) {
+    ped.x -= Math.cos(ped.angle) * ped.speed * dt * 2;
+    ped.y -= Math.sin(ped.angle) * ped.speed * dt * 2;
+    ped.target = randomRoadPoint(Math.random);
+  }
+}
 
-  function pedStep(p, dt, cars, player) {
-    if (p.dead) return;
-    if (p.hitFlash > 0) p.hitFlash -= dt;
-    if (p.panic > 0) {
-      p.panic -= dt;
-      if (p.panic <= 0) p.state = 'walk';
-    }
-    var sp = p.state === 'panic' ? p.speed * 3.4 : p.speed;
-    // Pick a new ambling direction now and then, staying near roads.
-    if (p.state === 'walk' && Math.random() < dt * 0.25) {
-      p.angle += (Math.random() - 0.5) * 1.6;
-    }
-    if (p.state === 'panic' && Math.random() < dt * 0.8) {
-      p.angle += (Math.random() - 0.5) * 1.2;
-    }
-    var nx = p.x + Math.cos(p.angle) * sp * dt;
-    var ny = p.y + Math.sin(p.angle) * sp * dt;
-    if (!City.isBlocked(nx, ny, 8) && !City.isWater(nx, ny)) { p.x = nx; p.y = ny; }
-    else { p.angle += Math.PI / 2 + (Math.random() - 0.5); }
-    p.stepPhase += dt * sp * 0.18;
-    // Hit by a fast car?
-    for (var i = 0; i < cars.length; i++) {
-      var c = cars[i];
-      if (c.dead) continue;
-      var d = Math.hypot(c.x - p.x, c.y - p.y);
-      if (d < 22 && Math.abs(c.speed) > 60) {
-        p.dead = true;
-        p.hitFlash = 1;
-        // Only the player's own car raises the player's wanted level.
-        S.Events && S.Events.emit('pedHit', p, c === player.inCar);
-        return;
-      }
-    }
-    // Bump into the player on foot: just push aside.
-    if (player && !player.inCar) {
-      var d2 = Math.hypot(player.x - p.x, player.y - p.y);
-      if (d2 < 18 && d2 > 0.01) {
-        p.x -= (player.x - p.x) / d2 * 14 * dt * 4;
-        p.y -= (player.y - p.y) / d2 * 14 * dt * 4;
-      }
+// A pedestrian hit by a moving car goes down. Returns 'player' if the
+// player's car did it, 'traffic' if a traffic car did it, null otherwise.
+function pedHitByCar(ped, cars) {
+  if (ped.state === 'down') return null;
+  for (const car of cars) {
+    if (Math.abs(car.speed) < 40) continue;
+    if (dist2(ped.x, ped.y, car.x, car.y) < 26 * 26) {
+      ped.state = 'down';
+      ped.down = 4;
+      return car.isPlayer ? 'player' : 'traffic';
     }
   }
-
-  S.Peds = { makePed: makePed, spawnPeds: spawnPeds, scare: scare, pedStep: pedStep };
-})();
+  return null;
+}

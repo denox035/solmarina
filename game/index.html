@@ -3,15 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
 <title>SOLMARINA — Open World</title>
 <style>
-  html, body { margin: 0; padding: 0; background: #0b1020; overflow: hidden; height: 100%; }
-  #wrap { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }
-  canvas { display: block; background: #16324a; }
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #0a0e18; }
+  canvas { display: block; width: 100vw; height: 100vh; }
 </style>
 </head>
 <body>
-<div id="wrap"><canvas id="game" width="1280" height="720"></canvas></div>
+<canvas id="game"></canvas>
 <script src="src/city.js"></script>
 <script src="src/audio.js"></script>
 <script src="src/vehicles.js"></script>
